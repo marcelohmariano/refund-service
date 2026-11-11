@@ -1,8 +1,6 @@
 """Refunds for merchants. create_refund() is called by an AWS Lambda function; when the call times out,
 Lambda retries it with the same request_id."""
 
-import uuid
-
 from .store import Cache, Table
 
 
@@ -13,7 +11,12 @@ class RefundService:
 
     def create_refund(self, request_id: str, merchant_id: str, amount_cents: int) -> str:
         """Refund amount_cents from the merchant's balance and return the refund id."""
-        refund_id = str(uuid.uuid4())
+        refund_id = request_id
+
+        item = self.table.get_item(f"refund#{refund_id}")
+        if item:
+            return refund_id  # already refunded, probably a retry after a timeout
+
         self.table.put_item({
             "pk": f"refund#{refund_id}",
             "request_id": request_id,
@@ -21,6 +24,11 @@ class RefundService:
             "amount_cents": amount_cents,
         })
         self._add_to_balance(merchant_id, -amount_cents)
+
+        # Invalidate the cached balance
+        key = f"balance:{merchant_id}"
+        self.cache.delete(key)
+
         return refund_id
 
     def balance(self, merchant_id: str) -> int:
